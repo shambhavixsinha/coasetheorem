@@ -4,7 +4,7 @@ import pdfplumber
 import fitz  # PyMuPDF
 
 # Function to extract text from PDF using pdfplumber
-def extract_text_from_pdf(pdf_path):
+def extract_text(pdf_path):
     pages = []
     try:
         with pdfplumber.open(pdf_path) as pdf:
@@ -21,16 +21,20 @@ def search_coase_references(pages):
     results = []
 
     for i, page_text in enumerate(pages):
-        for match in re.finditer(pattern, page_text, re.IGNORECASE):
-            paragraphs = page_text.split("\n")
-            for para in paragraphs:
-                if match.group(0) in para:
-                    results.append({
-                        "page": i + 1,
-                        "paragraph": para.strip(),
-                        "term": match.group(0)
-                    })
-                    break
+        # Split the text into sentences
+        sentences = re.split(r'(?<=[.!?])\s+', page_text)
+        page_references = []
+
+        for sentence in sentences:
+            if re.search(pattern, sentence, re.IGNORECASE):
+                page_references.append(sentence.strip())
+
+        if page_references:
+            results.append({
+                "page": i + 1,
+                "sentences": page_references
+            })
+
     return results
 
 # Function to extract page images and highlight terms
@@ -41,14 +45,13 @@ def highlight_term_in_pdf(pdf_path, references):
 
         for ref in references:
             page_num = ref['page'] - 1
-            term = ref['term']
-
             page = doc[page_num]
-            text_instances = page.search_for(term)
 
-            for inst in text_instances:
-                # Highlight each instance of the term
-                page.add_highlight_annot(inst)
+            for sentence in ref['sentences']:
+                text_instances = page.search_for(sentence)
+                for inst in text_instances:
+                    # Highlight each instance of the term
+                    page.add_highlight_annot(inst)
 
         # Save the PDF with highlights
         doc.save(output_path, deflate=True)
@@ -63,7 +66,10 @@ def save_to_text_file(pdf_path, references):
     with open(text_file_path, 'w') as f:
         for ref in references:
             f.write(f"Page: {ref['page']}\n")
-            f.write(f"Paragraph: {ref['paragraph']}\n")
+            if len(ref['sentences']) > 1:
+                f.write("Multiple references found on this page:\n")
+            for sentence in ref['sentences']:
+                f.write(f"- {sentence}\n")
             f.write('-' * 50 + '\n\n')
     
     print(f"Extracted references saved to: {text_file_path}")
@@ -78,7 +84,7 @@ for pdf_filename in os.listdir(pdf_dir):
         print(f"Processing file: {pdf_filename}")
         
         # Extract text from PDF
-        pages = extract_text_from_pdf(pdf_path)
+        pages = extract_text(pdf_path)
         
         if pages:
             # Search for Coase references
