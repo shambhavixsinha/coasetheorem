@@ -21,32 +21,32 @@ def extract_text(pdf_path):
         print(f"Error extracting text from {pdf_path}: {e}")
         return None
 
-# Function to search for author information
+# New improved function to search for author information (restricted to the first 10 pages)
 def extract_author_info(pages):
-    author_info = None
+    author_info = []
 
-    # Pattern to match multiline footnotes starting with '*'
-    footnote_pattern = r'\*.*?(?=\n\n|\Z)'
-    keywords_pattern = r'(Professor|University|Law|J\.D\.|A\.B\.|Ph\.D\.|Esq\.|LL\.M\.)'
+    # Patterns to identify author-related information
+    patterns = [
+        r'\bProfessor\s+[A-Z][a-zA-Z]+',                   # Professor title with name
+        r'\b[A-Z][a-zA-Z]+\s+University\b',               # University names
+        r'\bSchool of\b',                              # Law schools
+        r'\bJ\.D\.|\bPh\.D\.|\bLL\.M\.|\bEsq\.',  # Degrees and titles
+        r'\bA\.B\.|\bB\.A\.|\bB\.S\.|\bM\.A\.',  # Additional degrees
+        r'\bDean\b|\bChair\b',                           # Administrative titles
+        r'\b[A-Z][a-zA-Z]+,\s+\d{4}\b'                   # College degree with year
+    ]
 
-    for page_text in pages:
-        # Search for footnotes with asterisk
-        footnote_match = re.search(footnote_pattern, page_text, re.IGNORECASE | re.DOTALL)
-        if footnote_match:
-            full_footnote = footnote_match.group(0).strip()
-            if re.search(keywords_pattern, full_footnote, re.IGNORECASE):
-                author_info = full_footnote.strip()
-                break
+    combined_pattern = '|'.join(patterns)
 
-    if not author_info:
-        general_pattern = r'(Professor [A-Z][a-zA-Z]*|[A-Z][a-zA-Z]* University|School of Law)'
-        for page_text in pages:
-            general_match = re.search(general_pattern, page_text, re.IGNORECASE)
-            if general_match:
-                author_info = general_match.group(0).strip()
-                break
+    for i, page_text in enumerate(pages[:10]):  # Restrict search to the first 10 pages
+        sentences = re.split(r'(?<=[.!?])\s+', page_text)
+        for sentence in sentences:
+            if re.search(combined_pattern, sentence, re.IGNORECASE):
+                author_info.append(sentence.strip())
 
-    return author_info or "Author information not found."
+    # Remove duplicates and join information into a single string
+    author_info = list(set(author_info))
+    return author_info if author_info else ["Author information not found."]
 
 # Function to search for "Coase" references in the text
 def search_coase_references(pages):
@@ -65,8 +65,9 @@ def search_coase_references(pages):
 def highlight_term_in_pdf(pdf_path, references, author_info):
     try:
         doc = fitz.open(pdf_path)
-        output_path = os.path.splitext(pdf_path)[0] + '_highlighted.pdf'
+        output_path = pdf_path
 
+        # Highlight Coase references
         for ref in references:
             page_num = ref['page'] - 1
             page = doc[page_num]
@@ -76,27 +77,28 @@ def highlight_term_in_pdf(pdf_path, references, author_info):
                 for inst in text_instances:
                     page.add_highlight_annot(inst)
 
-        if author_info and author_info != "Author information not found.":
-            for page_num in range(len(doc)):
+        # Highlight author information (entire sentences)
+        if author_info and author_info != ["Author information not found."]:
+            for page_num in range(min(10, len(doc))):  # Restrict highlighting to the first 10 pages
                 page = doc[page_num]
-                text_instances = page.search_for(author_info)
-                for inst in text_instances:
-                    page.add_highlight_annot(inst)
+                for sentence in author_info:
+                    text_instances = page.search_for(sentence)
+                    if text_instances:
+                        for inst in text_instances:
+                            page.add_highlight_annot(inst)
 
-        doc.save(output_path, deflate=True)
+        doc.saveIncr()
         print(f"Highlighted PDF saved to: {output_path}")
     except Exception as e:
         print(f"Error highlighting terms in {pdf_path}: {e}")
 
-# Function to save the extracted references and author info to a text file
-def save_to_text_file(pdf_path, title, author, author_info, references):
+# Function to save the extracted references to a text file
+def save_to_text_file(pdf_path, title, author, references):
     text_file_path = os.path.splitext(pdf_path)[0] + '_coase_references.txt'
 
     with open(text_file_path, 'w') as f:
         f.write(f"Title: {title}\n")
         f.write(f"Author: {author}\n")
-        f.write('=' * 50 + '\n\n')
-        f.write(f"Author Information:\n{author_info}\n")
         f.write('=' * 50 + '\n\n')
         
         for ref in references:
@@ -137,12 +139,12 @@ for pdf_filename in os.listdir(pdf_dir):
             # Search for Coase references
             references = search_coase_references(pages)
             
-            # Save references and author info to a text file
-            if references or author_info:
-                save_to_text_file(pdf_path, title, author, author_info, references)
+            # Save references to a text file
+            if references:
+                save_to_text_file(pdf_path, title, author, references)
                 # Highlight terms in the PDF and save a visual version
                 highlight_term_in_pdf(pdf_path, references, author_info)
             else:
-                print(f"No Coase references or author information found in {pdf_filename}")
+                print(f"No Coase references found in {pdf_filename}")
         else:
             print(f"Skipping {pdf_filename} due to extraction failure.")
